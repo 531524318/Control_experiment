@@ -27,7 +27,10 @@ import com.flag.control_experiment.tcpUtils.ThreadPool;
 
 import org.json.JSONException;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
@@ -778,6 +781,153 @@ public class MainActivity extends AppCompatActivity {
                         closeListener();
                     }
                 });
+        //上位机C#客户端软件，服务监听地址192.168.1.200:6003
+        Observable.create(new ObservableOnSubscribe<Object>() {
+            @Override
+            public void subscribe(ObservableEmitter<Object> emitter) throws Exception {
+                ServerSocket serverSocket = null;
+                try {
+                    serverSocket = new ServerSocket(6003, 1, InetAddress.getByName("192.168.1.200"));//连接zigbee端口，参数1代表最多只存在一个等待连接
+                } catch (Exception e) {
+                    emitter.onError(e);
+                }
+                if (serverSocket == null) {
+                    isStartServer = !isStartServer;     //允许再次建立监听
+                    emitter.onComplete();
+                    return;
+                }
+                serverManager.add(serverSocket);
+                while (true) {
+                    try {
+                        csocketclient = serverSocket.accept();
+                        handlerData("", "", "cshar");
+                        Log.d(TAG, "获取PC上位机客户端连接: " + "New connection accept" + csocketclient.getInetAddress());
+                        BufferedReader br = new BufferedReader(new InputStreamReader(csocketclient.getInputStream()));
+                        outPC = new PrintWriter(new OutputStreamWriter(csocketclient.getOutputStream(), "GBK"));
+                        char[] buf = new char[17];
+                        int len = 0;
+                        StringBuilder sb = new StringBuilder();
+                        while ((len = br.read(buf)) != -1) {
+
+                            String line = new String(buf, 0, len);
+                            sb.append(line);
+                            if (!br.ready()) {
+                                String result = sb.toString();
+
+                                sb.setLength(0);
+
+                                //读取App->A53发来的控制信息
+//                                if (!TextUtils.isEmpty(result) && result.length() > 3) {
+//                                    //家庭门锁控制系统
+//                                    if (result.startsWith("H") && result.substring(1, 3).equals(PracticalAppType.GATE_LOCK_GL_APP_TYPE) && result.endsWith("T")) {
+//                                        GateLockService.getInstance().handleRecvData(result, outPC);
+//                                    }
+//                                    //家庭安防报警系统  家庭火灾报警系统 家庭可燃气体泄漏报警系统
+//                                    else if (result.startsWith("H") && PracticalAppType.getAlarmAppType(result) && result.endsWith("T")) {
+//                                        AlarmCfgService.getInstance().handleRecvData(result, outPC, mContext);
+//                                    }
+//                                }
+
+                                //读取到上位机发送来的控制信息，如果满足了PLC数据条件就发送往串口
+//                                if (result.startsWith("H") && result.charAt(1) == 'p' && result.charAt(2) == 'c' && result.endsWith("T")) {
+//                                    if (model_outPort == null) { //初始化串口输出对象
+//                                        SharedPreferences pref = mContext.getSharedPreferences("serial_com", Context.MODE_PRIVATE);
+//                                        String model_com = pref.getString("plc_model_com", "/dev/ttySAC1");
+//                                        String model_rate = pref.getString("plc_model_rate", "9600");
+//                                        config = new GetSerialConfig();
+//                                        model_outPort = config.getPlcSerialPort(mContext, model_com, model_rate).getOutputStream();
+//
+//                                    }
+//                                    try {
+//                                        model_outPort.write(result.getBytes());//输出串口
+//                                    } catch (IOException e) {
+//                                        e.printStackTrace();
+//                                    }
+//                                    continue;
+//                                }
+//                                如果是与控制wifi或者zigbee 相关的控制命令,发送给对应
+                                if (result.startsWith("H") && (result.charAt(1) == 'w' || result.charAt(1) == 'z')
+                                        && result.charAt(2) == 'c' && result.endsWith("T")) {
+                                    String number = result.substring(5, 7);
+                                    switch (result.substring(3, 5)) {
+                                        case "af":
+                                            number = "风扇" + number;
+                                            break;
+                                        case "rs":
+                                            number = "卷帘" + number;
+                                            break;
+                                        case "pl":
+                                            number = "植物生长灯" + number;
+                                            break;
+                                        case "cr":
+                                            number = "加热器" + number;
+                                            break;
+                                        case "hr":
+                                            number = "加湿器" + number;
+                                            break;
+                                        /**cssf新增应用**/
+                                        case "el":
+                                            number = "电磁锁" + number;
+                                            break;
+                                        case "al":
+                                            number = "可调灯" + number;
+                                            break;
+                                        case "re":
+                                            number = "继电器" + number;
+                                            break;
+                                        case "or":
+                                            number = "全向红外" + number;
+                                            break;
+                                    }
+
+                                    if (findRunThenSendMsg(number, result)) {
+
+                                    } else {
+
+                                    }
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+//                        e.printStackTrace();
+                        if (outPC != null) {
+                            outPC.close();
+                            outPC = null;
+                        }
+                        if (csocketclient != null) {
+                            csocketclient.close();
+                        }
+
+                    }
+                }
+            }
+        }).subscribeOn(Schedulers.newThread()).observeOn(AndroidSchedulers.mainThread())
+                .subscribe(new Observer<Object>() {
+                    private Disposable mDisposable;
+
+                    @Override
+                    public void onSubscribe(Disposable d) {
+                        mDisposable = d;
+                        disposableManager.add(d);
+                    }
+
+                    @Override
+                    public void onNext(Object value) {
+
+                    }
+
+                    @Override
+                    public void onError(Throwable e) {
+
+                    }
+
+                    @Override
+                    public void onComplete() {
+                        successOpen.setText("打开失败，端口被占用！\n请重启该软件！");
+                        mDisposable.dispose();
+                        closeListener();
+                    }
+                });
 
     }
     //定时检查runable 的数据传输以及连接状态
@@ -1065,6 +1215,30 @@ public class MainActivity extends AppCompatActivity {
                 middle.setStatueControl(dataContext);
                 break;
             }
+        }
+    }
+    //依据编号number寻找到对应Runnable对象，调用输出对象属性，将信息输出
+    public boolean findRunThenSendMsg(String number, String message) {
+        try {
+            for (String ipTypeNumber : nodeLayoutMap.keySet()) {
+                if (ipTypeNumber.endsWith(number)) { //通过遍历 节点布局Map找到包含编号的ip地址
+                    String ipAddress = nodeLayoutMap.get(ipTypeNumber).getLinkIP();
+                    IOBlockedRunnable run = (IOBlockedRunnable) socketMap.get(ipAddress);
+                    if (run != null) {
+                        run.pw.write(message);
+                        run.pw.flush();
+                        return true;
+                    } else {
+                        Log.d(TAG, "等于空: ");
+                    }
+                    return false;
+                }
+            }
+            return false;
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
         }
     }
     //将信息发送给C#软件
